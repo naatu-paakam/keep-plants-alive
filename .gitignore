@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Environment — secrets (never commit)
+.env
+.env.local
+.env.*.local
+*.local
+
+# Private notes (never commit)
+.notes
+
+# Netlify local state
+.netlify/
+
+# Playwright test artifacts
+test-results/
+playwright-report/
+.playwright/
+
+# Screenshots (local dev only)
+screenshots/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp files
+*.tmp
+*.temp
+
+# Netlify CLI artifacts
+deno.lock
+
+# Stray screenshots at root
+*.png
+*.jpg
+*.jpeg
+!e2e/fixtures/*.jpg
+!e2e/fixtures/*.png

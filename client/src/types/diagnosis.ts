@@ -1,0 +1,8 @@
+export interface DiagnosisResponse {
+  health_score: number;
+  status: string;
+  issues: string[];
+  likely_cause: string;
+  recommended_tools: string[];
+  urgency: "low" | "medium" | "high";
+}
