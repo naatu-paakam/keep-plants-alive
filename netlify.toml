@@ -10,6 +10,8 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # VERTEX_LOCATION and VERTEX_PROJECT_ID are GCP config, not secrets — omit from scanner
+  SECRETS_SCAN_OMIT_KEYS = "VERTEX_LOCATION,VERTEX_PROJECT_ID"
 
 [functions]
   directory = "netlify/functions"
