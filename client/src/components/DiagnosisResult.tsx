@@ -1,4 +1,4 @@
-import { Camera } from "lucide-react";
+import { Camera, Leaf } from "lucide-react";
 import type { DiagnosisResponse } from "../types/diagnosis";
 import ProductCard, { mapToolsToProducts } from "./ProductCard";
 
@@ -84,6 +84,24 @@ export default function DiagnosisResult({ result }: DiagnosisResultProps) {
                   !
                 </span>
                 {issue}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Home Remedies */}
+      {result.home_remedies?.length > 0 && (
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4">
+          <h3 className="text-sm font-semibold text-emerald-800 mb-3 flex items-center gap-1.5">
+            <Leaf className="w-4 h-4" />
+            Home Remedies
+          </h3>
+          <ul className="space-y-2">
+            {result.home_remedies.map((remedy, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-emerald-900">
+                <span className="mt-0.5 text-emerald-500 flex-shrink-0">🌿</span>
+                {remedy}
               </li>
             ))}
           </ul>
