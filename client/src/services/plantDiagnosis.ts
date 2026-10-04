@@ -55,7 +55,15 @@ function fileToBase64(file: File): Promise<{ base64: string; mediaType: string }
   });
 }
 
-export async function analyzePlant(imageFile: File): Promise<DiagnosisResponse> {
+export interface LocationContext {
+  latitude: number;
+  longitude: number;
+}
+
+export async function analyzePlant(
+  imageFile: File,
+  location?: LocationContext
+): Promise<DiagnosisResponse> {
   const { base64, mediaType } = await fileToBase64(imageFile);
 
   let response: Response;
@@ -67,6 +75,7 @@ export async function analyzePlant(imageFile: File): Promise<DiagnosisResponse> 
       },
       body: JSON.stringify({
         model: "claude-opus-4-5",
+        ...(location && { latitude: location.latitude, longitude: location.longitude }),
         max_tokens: 1024,
         messages: [
           {

@@ -18,6 +18,76 @@
 import crypto from "crypto";
 import fs from "fs";
 
+async function fetchWeatherContext(latitude, longitude) {
+  try {
+    // 1. Fetch 21 days of weather from Open-Meteo (free, no API key)
+    const weatherUrl = new URL("https://api.open-meteo.com/v1/forecast");
+    weatherUrl.searchParams.set("latitude", latitude);
+    weatherUrl.searchParams.set("longitude", longitude);
+    weatherUrl.searchParams.set("current", "temperature_2m,relative_humidity_2m,precipitation,weather_code");
+    weatherUrl.searchParams.set("daily", "temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_max");
+    weatherUrl.searchParams.set("past_days", "21");
+    weatherUrl.searchParams.set("forecast_days", "1");
+    weatherUrl.searchParams.set("timezone", "auto");
+
+    const [weatherResp, geoResp] = await Promise.all([
+      fetch(weatherUrl.toString()),
+      fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&accept-language=en`,
+        { headers: { "User-Agent": "KeepYourPlantsAlive/1.0 (plantslife.netlify.app)" } }
+      ),
+    ]);
+
+    const weather = await weatherResp.json();
+    const geo = geoResp.ok ? await geoResp.json() : null;
+
+    // Build location label
+    const city = geo?.address?.city || geo?.address?.town || geo?.address?.village || null;
+    const country = geo?.address?.country || null;
+    const locationLabel = city && country
+      ? `${city}, ${country} (${latitude.toFixed(2)}°N, ${longitude.toFixed(2)}°E)`
+      : `${latitude.toFixed(2)}°N, ${longitude.toFixed(2)}°E`;
+
+    // Summarise daily data
+    const daily = weather.daily || {};
+    const maxTemps = daily.temperature_2m_max || [];
+    const minTemps = daily.temperature_2m_min || [];
+    const precip = daily.precipitation_sum || [];
+    const humidity = daily.relative_humidity_2m_max || [];
+
+    const totalRain = precip.reduce((s, v) => s + (v || 0), 0).toFixed(1);
+    const rainyDays = precip.filter(v => v > 0.5).length;
+    const avgHigh = maxTemps.length ? (maxTemps.reduce((s, v) => s + v, 0) / maxTemps.length).toFixed(1) : "?";
+    const avgLow = minTemps.length ? (minTemps.reduce((s, v) => s + v, 0) / minTemps.length).toFixed(1) : "?";
+    const avgHumidity = humidity.length ? (humidity.reduce((s, v) => s + v, 0) / humidity.length).toFixed(0) : "?";
+
+    const current = weather.current || {};
+    const currentTemp = current.temperature_2m ?? "?";
+    const currentHumidity = current.relative_humidity_2m ?? "?";
+    const currentRain = current.precipitation ?? 0;
+
+    return `LOCATION & WEATHER CONTEXT (use this to calibrate your diagnosis and home remedies):
+Location: ${locationLabel}
+Current conditions: ${currentTemp}°C, ${currentHumidity}% humidity, ${currentRain}mm rain today
+Past 21 days:
+  - Total rainfall: ${totalRain}mm (${rainyDays} rainy day${rainyDays !== 1 ? "s" : ""} out of 21)
+  - Avg high / low temp: ${avgHigh}°C / ${avgLow}°C
+  - Average max humidity: ${avgHumidity}%
+
+Use this context to:
+- Adjust drought/overwatering likelihood based on recent rainfall
+- Flag heat stress if temperatures are extreme
+- Warn about frost risk if overnight lows are near 0°C
+- Calibrate fungal/mould risk against humidity levels
+- Suggest location-appropriate home remedies (e.g. shade cloth in extreme heat, frost fleece in cold snaps)
+
+`;
+  } catch (err) {
+    console.warn("Weather fetch failed, proceeding without context:", err.message);
+    return "";
+  }
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type",
@@ -106,6 +176,31 @@ export const handler = async (event) => {
     };
   }
 
+  // Inject weather context into the last user text message if location provided
+  let enrichedBody = requestBody;
+  if (requestBody.latitude != null && requestBody.longitude != null) {
+    const weatherContext = await fetchWeatherContext(requestBody.latitude, requestBody.longitude);
+    if (weatherContext) {
+      const { latitude, longitude, ...rest } = requestBody;
+      const messages = rest.messages.map((msg, i) => {
+        if (i !== rest.messages.length - 1) return msg;
+        // Prepend weather context to the last user message's text content
+        const content = Array.isArray(msg.content)
+          ? msg.content.map(block =>
+              block.type === "text"
+                ? { ...block, text: weatherContext + block.text }
+                : block
+            )
+          : msg.content;
+        return { ...msg, content };
+      });
+      enrichedBody = { ...rest, messages };
+    } else {
+      const { latitude, longitude, ...rest } = requestBody;
+      enrichedBody = rest;
+    }
+  }
+
   let claudeResponse;
 
   try {
@@ -117,7 +212,7 @@ export const handler = async (event) => {
       const location = process.env.VERTEX_LOCATION || "us-east5";
 
       const token = await getVertexToken(serviceAccount);
-      const { model, ...rest } = requestBody;
+      const { model, ...rest } = enrichedBody;
       const vertexBody = { ...rest, anthropic_version: "vertex-2023-10-16" };
       const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/anthropic/models/${model}:rawPredict`;
 
@@ -148,7 +243,7 @@ export const handler = async (event) => {
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(enrichedBody),
       });
     }
   } catch (err) {

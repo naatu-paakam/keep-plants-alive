@@ -1,11 +1,14 @@
-import { useState } from "react";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Loader2, ArrowLeft, MapPin, MapPinOff } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import CameraUpload from "../components/CameraUpload";
 import DiagnosisResult from "../components/DiagnosisResult";
 import FeedbackWidget from "../components/FeedbackWidget";
 import { analyzePlant } from "../services/plantDiagnosis";
+import type { LocationContext } from "../services/plantDiagnosis";
 import type { DiagnosisResponse } from "../types/diagnosis";
+
+type LocationState = "pending" | "granted" | "denied" | "unavailable";
 
 export default function Diagnose() {
   const navigate = useNavigate();
@@ -15,6 +18,29 @@ export default function Diagnose() {
   const [result, setResult] = useState<DiagnosisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [noFileError, setNoFileError] = useState(false);
+  const [location, setLocation] = useState<LocationContext | null>(null);
+  const [locationState, setLocationState] = useState<LocationState>("pending");
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationState("unavailable");
+      return;
+    }
+    const timeout = setTimeout(() => setLocationState("unavailable"), 8000);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timeout);
+        setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        setLocationState("granted");
+      },
+      () => {
+        clearTimeout(timeout);
+        setLocationState("denied");
+      },
+      { timeout: 7000, maximumAge: 300_000 }
+    );
+    return () => clearTimeout(timeout);
+  }, []);
 
   function handleImageSelected(file: File) {
     setSelectedFile(file);
@@ -36,7 +62,7 @@ export default function Diagnose() {
     setResult(null);
 
     try {
-      const diagnosis = await analyzePlant(selectedFile);
+      const diagnosis = await analyzePlant(selectedFile, location ?? undefined);
       setResult(diagnosis);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
@@ -59,10 +85,24 @@ export default function Diagnose() {
       </nav>
 
       <main className="max-w-2xl mx-auto px-6 pb-20">
-        <h1 className="text-2xl font-extrabold text-gray-900 mb-2">Plant Health Check</h1>
-        <p className="text-gray-500 text-sm mb-6">
+        <h1 className="text-2xl font-extrabold text-gray-900 mb-1">Plant Health Check</h1>
+        <p className="text-gray-500 text-sm mb-3">
           Take a photo or upload an image of your plant to get an instant AI diagnosis.
         </p>
+
+        {/* Location badge */}
+        {locationState === "granted" && (
+          <div data-testid="location-badge" className="mb-4 flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-3 py-1 w-fit">
+            <MapPin className="w-3 h-3" />
+            Using your location for weather-aware diagnosis
+          </div>
+        )}
+        {(locationState === "denied" || locationState === "unavailable") && (
+          <div data-testid="location-denied" className="mb-4 flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-full px-3 py-1 w-fit">
+            <MapPinOff className="w-3 h-3" />
+            No location — diagnosis without local weather context
+          </div>
+        )}
 
         {/* Upload zone */}
         <CameraUpload onImageSelected={handleImageSelected} selectedFile={selectedFile} />
@@ -92,7 +132,7 @@ export default function Diagnose() {
             {loading ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                Analyzing your plant...
+                {locationState === "granted" ? "Fetching weather & analyzing..." : "Analyzing your plant..."}
               </>
             ) : (
               "Analyze Plant"

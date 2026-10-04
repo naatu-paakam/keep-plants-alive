@@ -15,19 +15,112 @@ This iteration ships a standalone web app at `/diagnose` that lets a user photog
 
 1. Home page (`/`) — hero, tagline, single CTA to `/diagnose`
 2. Diagnose page (`/diagnose`) — camera/file upload, image preview, "Analyze Plant" trigger
-3. Claude vision API call — sends base64 image, receives structured JSON diagnosis
+3. Claude vision API call — sends base64 image + weather context, receives structured JSON diagnosis
 4. Diagnosis result display — health score, status, issues, likely cause, urgency
-5. Product recommendation cards — maps Claude's `recommended_tools` to top-10 SKUs with affiliate/store links
-6. Error states — missing key, no file selected, API failure, malformed JSON response
-7. Playwright test suite — TC-001 through TC-006 covering all critical paths
+5. Home remedies — 2–4 household treatments matched to the plant's specific issues (shown before commercial tools)
+6. Product recommendation cards — maps Claude's `recommended_tools` to top-10 SKUs with affiliate/store links
+7. Location-aware weather context — optional browser geolocation + Open-Meteo weather (3 weeks) injected into Claude prompt
+8. Feedback widget — inline form that emails diagnosis + photo to store owner via Resend
+9. Error states — no file, API failure, not a plant, geolocation denied
+10. Playwright test suite — TC-001 through TC-013 covering all critical paths
 
-**Out of scope (deferred to R1):**
+**Out of scope (deferred to R2):**
 
 - User accounts or saved diagnoses
 - Shopify or real checkout integration
-- Backend server / serverless function for API key proxying (R1 security upgrade)
 - Push notifications or PWA install prompt
 - Multiple plant submissions in one session
+
+---
+
+## 1b. Location-Aware Weather Context — Design
+
+### Overview
+
+When a user taps "Analyze Plant", the app optionally requests their device location. If granted, the Netlify Function fetches 3 weeks of real weather data from Open-Meteo before calling Claude. This weather context is injected into the Claude prompt so the diagnosis and home remedies are calibrated to actual local conditions.
+
+### Data Flow
+
+```
+Browser
+ 1. User uploads plant photo
+ 2. Browser requests Geolocation permission (one-time prompt)
+ 3. If granted: sends { image, latitude, longitude } to claude-proxy
+ 4. If denied:  sends { image } only — diagnosis works without location
+
+Netlify Function (claude-proxy.js)
+ 5. If location present:
+    a. Fetch Open-Meteo API (free, no API key):
+       GET https://api.open-meteo.com/v1/forecast
+         ?latitude=X&longitude=Y
+         &current=temperature_2m,relative_humidity_2m,precipitation,weather_code
+         &daily=temperature_2m_max,temperature_2m_min,precipitation_sum,relative_humidity_2m_max
+         &past_days=21&forecast_days=1&timezone=auto
+    b. Fetch reverse geocoding (Nominatim / OpenStreetMap, free, no key):
+       GET https://nominatim.openstreetmap.org/reverse
+         ?lat=X&lon=Y&format=json&accept-language=en
+    c. Summarise into a weather context string
+ 6. Build enriched Claude prompt with weather context prepended
+ 7. Call Vertex AI Claude with image + enriched prompt
+
+Claude
+ 8. Diagnoses plant with full environmental context
+ 9. Returns: health_score, status, issues, likely_cause,
+             home_remedies (location-aware), recommended_tools, urgency
+```
+
+### Weather Context String Format (injected into Claude prompt)
+
+```
+LOCATION & WEATHER CONTEXT (use this to calibrate your diagnosis):
+Location: Hyderabad, Telangana, India (17.38°N, 78.48°E)
+Current conditions: 34°C, 78% humidity, 0mm rain today
+Past 21 days:
+  - Total rainfall: 12mm (very dry)
+  - Avg high / low temp: 41°C / 28°C
+  - Average humidity: 65%
+  - Rainy days: 3 of 21
+
+Use this context to:
+- Adjust drought/overwatering likelihood based on recent rainfall
+- Flag heat stress if temps are extreme
+- Warn about frost if overnight lows are near 0°C
+- Calibrate fungal/mould risk against humidity levels
+- Suggest location-appropriate home remedies
+```
+
+### Open-Meteo API
+
+- **URL:** `https://api.open-meteo.com/v1/forecast`
+- **Cost:** Completely free, no API key required, generous rate limits
+- **Data:** Current conditions + daily summaries up to 92 days back
+- **Parameters used:** `past_days=21`, `current`, `daily`, `timezone=auto`
+
+### Reverse Geocoding (city name from lat/lng)
+
+- **URL:** `https://nominatim.openstreetmap.org/reverse`
+- **Cost:** Free (OpenStreetMap), requires `User-Agent` header with app name
+- **Fallback:** If geocoding fails, use raw coordinates (`17.38°N, 78.48°E`)
+
+### UI — Location Permission Flow
+
+```
+Before analysis:
+  [📍 Using your location for better diagnosis]   ← shows if permission granted
+  [⚠ No location — diagnosis without weather context] ← shows if denied/unavailable
+
+On Diagnose page load:
+  - Navigator.geolocation.getCurrentPosition() called automatically
+  - 5s timeout — if no response, proceed without location
+  - Permission denial is graceful — diagnosis still works
+```
+
+### Privacy
+
+- Coordinates are sent to our Netlify Function only, never stored
+- The function fetches weather for those coordinates and discards them
+- No coordinates or weather data are logged or persisted
+- User can deny location and still use the full diagnosis feature
 
 ---
 
